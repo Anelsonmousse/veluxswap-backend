@@ -187,7 +187,7 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// Resend OTP
+// Resend OTP using userId (original method)
 router.post('/resend-otp', async (req, res) => {
   try {
     const { userId } = req.body;
@@ -251,6 +251,100 @@ router.post('/resend-otp', async (req, res) => {
     res.status(500).json({ 
       message: 'Server error during OTP resend', 
       error: error.message 
+    });
+  }
+});
+
+// NEW: Resend OTP using email address only (user-friendly)
+router.post('/resend-otp-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Validation
+    if (!email) {
+      return res.status(400).json({ 
+        message: 'Email address is required' 
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ 
+        message: 'Please provide a valid email address' 
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      return res.status(200).json({ 
+        message: 'If an account with this email exists and is not verified, an OTP has been sent.',
+        success: true
+      });
+    }
+
+    // Check if already verified
+    if (user.isEmailVerified) {
+      return res.status(400).json({ 
+        message: 'This email is already verified. Please login instead.',
+        isVerified: true
+      });
+    }
+
+    // Rate limiting - more restrictive for email-based requests
+    const now = new Date();
+    const timeSinceLastOtp = user.lastOtpSent ? 
+      (now - user.lastOtpSent) / 1000 : Infinity;
+
+    if (timeSinceLastOtp < 120) { // 2 minutes for email-based requests
+      return res.status(429).json({
+        message: 'Please wait before requesting a new OTP',
+        waitTime: Math.ceil(120 - timeSinceLastOtp)
+      });
+    }
+
+    // Check for too many attempts
+    if (user.registrationAttempts >= 5) {
+      return res.status(429).json({
+        message: 'Too many OTP requests. Please try again later or contact support.',
+        tooManyAttempts: true
+      });
+    }
+
+    // Generate and send new OTP
+    const otp = emailService.generateOTP();
+    const otpExpiry = new Date(Date.now() + (process.env.OTP_EXPIRY || 10) * 60 * 1000);
+
+    user.emailOTP = otp;
+    user.otpExpiry = otpExpiry;
+    user.lastOtpSent = now;
+    user.registrationAttempts += 1;
+
+    await user.save();
+
+    // Send OTP email
+    const emailResult = await emailService.sendOTP(user.email, otp, user.username);
+    if (!emailResult.success) {
+      return res.status(500).json({
+        message: 'Failed to send OTP email. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? emailResult.error : undefined
+      });
+    }
+
+    res.status(200).json({
+      message: 'OTP sent successfully to your email address',
+      success: true,
+      otpExpiry: otpExpiry,
+      userId: user._id // Include userId for subsequent verification
+    });
+
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    res.status(500).json({ 
+      message: 'Server error during OTP resend. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
