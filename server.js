@@ -7,6 +7,12 @@ console.log('🚀 Starting VeluxSwap Backend...');
 
 const app = express();
 
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`📍 Incoming request: ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -14,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Basic route
 app.get('/', (req, res) => {
+  console.log('📍 Root route hit');
   res.json({ 
     message: 'VeluxSwap Auth API with Email OTP is running!',
     timestamp: new Date().toISOString(),
@@ -24,7 +31,7 @@ app.get('/', (req, res) => {
 
 // Test route to check if Express is working
 app.get('/test-express', (req, res) => {
-  console.log('Express test route hit');
+  console.log('📍 Express test route hit');
   res.json({ message: 'Express is working!' });
 });
 
@@ -44,17 +51,36 @@ mongoose.connect(process.env.MONGODB_URI)
       
       // Check if it's a valid router
       if (typeof authRoutes === 'function') {
+        // Add debugging middleware before mounting auth routes
+        app.use('/api/auth', (req, res, next) => {
+          console.log(`📍 Auth middleware hit: ${req.method} ${req.originalUrl}`);
+          console.log('📍 About to pass to auth router...');
+          next();
+        });
+        
         app.use('/api/auth', authRoutes);
         console.log('✅ Auth routes mounted to /api/auth');
         
         // List all registered routes for debugging
-        app._router.stack.forEach((middleware) => {
+        app._router.stack.forEach((middleware, index) => {
           if (middleware.route) {
-            console.log(`📍 Route: ${Object.keys(middleware.route.methods)} ${middleware.route.path}`);
+            console.log(`📍 Route ${index}: ${Object.keys(middleware.route.methods)} ${middleware.route.path}`);
           } else if (middleware.name === 'router') {
-            console.log(`📍 Router middleware mounted at: ${middleware.regexp}`);
+            console.log(`📍 Router middleware ${index} mounted at: ${middleware.regexp}`);
+          } else {
+            console.log(`📍 Middleware ${index}: ${middleware.name || 'anonymous'}`);
           }
         });
+
+        // Test auth routes after mounting
+        setTimeout(() => {
+          console.log('🧪 Testing internal route resolution...');
+          
+          // Try to manually resolve the route
+          const testReq = { method: 'GET', url: '/api/auth/' };
+          console.log('📍 Would route match for:', testReq);
+        }, 1000);
+        
       } else {
         console.error('❌ Auth routes is not a function:', typeof authRoutes);
       }
@@ -63,15 +89,19 @@ mongoose.connect(process.env.MONGODB_URI)
       console.error('Error name:', error.name);
       console.error('Error message:', error.message);
       console.error('Error stack:', error.stack);
-      
-      // Continue without auth routes
-      console.log('⚠️ Continuing without auth routes...');
     }
   })
   .catch((error) => {
     console.error('❌ MongoDB connection error:', error.message);
     process.exit(1);
   });
+
+// Add catch-all middleware before 404 handler
+app.use('/api/auth/*', (req, res, next) => {
+  console.log(`📍 Catch-all for /api/auth/*: ${req.method} ${req.originalUrl}`);
+  console.log('📍 This should not be reached if routes are working');
+  next();
+});
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -84,7 +114,7 @@ app.use((error, req, res, next) => {
 
 // 404 handler with more details
 app.use('*', (req, res) => {
-  console.log(`❌ Route not found: ${req.method} ${req.originalUrl}`);
+  console.log(`❌ 404 Handler: ${req.method} ${req.originalUrl}`);
   
   // List all available routes
   const routes = [];
@@ -112,4 +142,17 @@ app.listen(PORT, () => {
   console.log(`📧 Email user: ${process.env.EMAIL_USER || 'Not configured'}`);
   console.log(`🗄️ MongoDB URI: ${process.env.MONGODB_URI ? 'Configured' : 'Not configured'}`);
   console.log(`🔐 JWT Secret: ${process.env.JWT_SECRET ? 'Configured' : 'Not configured'}`);
+  
+  // List final route configuration
+  setTimeout(() => {
+    console.log('📍 Final route configuration:');
+    let routeCount = 0;
+    app._router.stack.forEach((middleware, index) => {
+      if (middleware.route) {
+        console.log(`  Route ${routeCount++}: ${Object.keys(middleware.route.methods).join(',').toUpperCase()} ${middleware.route.path}`);
+      } else if (middleware.name === 'router') {
+        console.log(`  Router: ${middleware.regexp}`);
+      }
+    });
+  }, 2000);
 });
