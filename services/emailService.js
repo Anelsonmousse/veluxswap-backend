@@ -3,7 +3,7 @@ const crypto = require('crypto');
 
 class EmailService {
   constructor() {
-    this.transporter = nodemailer.createTransporter({
+    this.transporter = nodemailer.createTransport({  // Fixed: createTransport (not createTransporter)
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
